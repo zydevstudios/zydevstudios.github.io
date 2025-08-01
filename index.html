@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+		<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+		<script type="text/javascript" src="app.js"></script>
+		<link rel="stylesheet" href="app.css" type="text/css" />
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamVault</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+        .container {
+            max-width: 90%;
+        }
+        .message-box {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            max-width: 300px;
+            z-index: 1000;
+        }
+        .tab-button.active {
+            @apply bg-blue-600 text-white;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name here
+        const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; // Replace with your Cloudinary cloud name
+
+        // Global variables for Firebase configuration provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // --- IMPORTANT: CONFIGURATION FOR THE ADMIN'S GOOGLE EMAIL ---
+        // This email address will be the only one able to upload videos.
+        const adminEmail = 'robloxbestgamer111@gmail.com';
+
+        // --- UI Element References ---
+        const authContainer = document.getElementById('auth-container');
+        const mainContainer = document.getElementById('main-container');
+        const googleSignInBtn = document.getElementById('google-signin-btn');
+        const signOutBtn = document.getElementById('signout-btn');
+        const uploadSection = document.getElementById('upload-section');
+        const uploadForm = document.getElementById('upload-form');
+        const videoTypeSelect = document.getElementById('videoType');
+        const seriesDetailsDiv = document.getElementById('series-details');
+        const movieDetailsDiv = document.getElementById('movie-details');
+        const messageBox = document.getElementById('message-box');
+        const moviesTabBtn = document.getElementById('movies-tab');
+        const seriesTabBtn = document.getElementById('series-tab');
+        const moviesContainer = document.getElementById('movies-container');
+        const seriesContainer = document.getElementById('series-container');
+        const videoPlayerModal = document.getElementById('video-player-modal');
+        const videoPlayer = document.getElementById('video-player');
+        const episodeListModal = document.getElementById('episode-list-modal');
+        const episodeListContainer = document.getElementById('episode-list-container');
+        
+        let currentActiveTab = 'movies';
+
+        // --- Helper Functions ---
+        /**
+         * Displays a temporary message to the user.
+         * @param {string} message The message to display.
+         * @param {string} type The type of message (e.g., 'success', 'error', 'info').
+         */
+        const showMessage = (message, type = 'info') => {
+            const el = document.createElement('div');
+            el.className = `p-4 rounded-lg shadow-lg mb-4 transform transition-transform duration-300 ease-out translate-x-0`;
+            if (type === 'success') {
+                el.classList.add('bg-green-500', 'text-white');
+            } else if (type === 'error') {
+                el.classList.add('bg-red-500', 'text-white');
+            } else {
+                el.classList.add('bg-blue-500', 'text-white');
+            }
+            el.innerHTML = `<p>${message}</p>`;
+            messageBox.appendChild(el);
+
+            setTimeout(() => {
+                el.classList.add('translate-x-full');
+                el.addEventListener('transitionend', () => el.remove());
+            }, 3000);
+        };
+        
+        /**
+         * Generates a streamable Cloudinary URL from a public ID.
+         * @param {string} publicId The Cloudinary public ID of the video.
+         * @returns {string} The full streamable URL.
+         */
+        const getCloudinaryVideoUrl = (publicId) => {
+            return `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/video/upload/f_auto/q_auto/${publicId}`;
+        };
+
+        /**
+         * Hides all main application sections and shows the specified one.
+         * @param {HTMLElement} element The element to show.
+         */
+        const showSection = (element) => {
+            [authContainer, mainContainer].forEach(el => el.classList.add('hidden'));
+            if (element) {
+                element.classList.remove('hidden');
+            }
+        };
+
+        /**
+         * Toggles between Movies and TV Series tabs.
+         * @param {string} tabName 'movies' or 'series'.
+         */
+        const switchTab = (tabName) => {
+            currentActiveTab = tabName;
+            if (tabName === 'movies') {
+                moviesTabBtn.classList.add('active');
+                seriesTabBtn.classList.remove('active');
+                moviesContainer.classList.remove('hidden');
+                seriesContainer.classList.add('hidden');
+            } else {
+                seriesTabBtn.classList.add('active');
+                moviesTabBtn.classList.remove('active');
+                seriesContainer.classList.remove('hidden');
+                moviesContainer.classList.add('hidden');
+            }
+        };
+
+        /**
+         * Renders a list of video cards.
+         * @param {Array} videos The array of video objects.
+         * @param {HTMLElement} container The container to render into.
+         * @param {string} type 'movie' or 'series'.
+         */
+        const renderVideos = (videos, container, type) => {
+            container.innerHTML = '';
+            if (videos.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-400">No ${type}s uploaded yet.</p>`;
+                return;
+            }
+            videos.forEach(video => {
+                const videoCard = document.createElement('div');
+                videoCard.className = 'bg-gray-800 p-6 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300 flex flex-col justify-between';
+                
+                let buttonHTML = '';
+                if (type === 'movie') {
+                    // Generate the video URL here from the stored publicId
+                    const videoURL = getCloudinaryVideoUrl(video.publicId);
+                    buttonHTML = `<button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-colors duration-300" data-url="${videoURL}">Watch Now</button>`;
+                } else if (type === 'series') {
+                    buttonHTML = `<button class="view-episodes-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-colors duration-300" data-series-id="${video.id}">View Episodes</button>`;
+                }
+
+                videoCard.innerHTML = `
+                    <div>
+                        <h3 class="text-2xl font-bold mb-2 text-white">${video.title}</h3>
+                        <p class="text-gray-400 text-sm mb-4">${video.description}</p>
+                    </div>
+                    ${buttonHTML}
+                `;
+                container.appendChild(videoCard);
+            });
+        };
+
+        // --- Main Logic ---
+
+        // Firebase Auth State Listener
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                showSection(mainContainer);
+
+                // Check if the current user is the admin based on email
+                if (user.email === adminEmail) {
+                    showMessage('Welcome, Admin! You can now upload content.', 'success');
+                    uploadSection.classList.remove('hidden');
+                } else {
+                    uploadSection.classList.add('hidden');
+                    showMessage('Welcome back! You can now watch videos.', 'success');
+                }
+                
+                // Set up real-time listeners for movies and series
+                const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
+                onSnapshot(moviesQuery, (querySnapshot) => {
+                    const movies = [];
+                    querySnapshot.forEach((doc) => {
+                        movies.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(movies, moviesContainer, 'movie');
+                }, (error) => {
+                    showMessage(`Error fetching movies: ${error.message}`, 'error');
+                });
+
+                const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
+                onSnapshot(seriesQuery, (querySnapshot) => {
+                    const series = [];
+                    querySnapshot.forEach((doc) => {
+                        series.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(series, seriesContainer, 'series');
+                }, (error) => {
+                    showMessage(`Error fetching series: ${error.message}`, 'error');
+                });
+
+            } else {
+                showSection(authContainer);
+            }
+        });
+
+        // --- Authentication Logic ---
+        googleSignInBtn.addEventListener('click', async () => {
+            try {
+                const provider = new GoogleAuthProvider();
+                await signInWithPopup(auth, provider);
+                showMessage('Signed in with Google successfully!', 'success');
+            } catch (error) {
+                console.error(error);
+                showMessage(`Google sign-in failed: ${error.message}`, 'error');
+            }
+        });
+
+        signOutBtn.addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+                showMessage('Signed out successfully!', 'info');
+                showSection(authContainer);
+            } catch (error) {
+                console.error(error);
+                showMessage(`Sign out failed: ${error.message}`, 'error');
+            }
+        });
+
+        // --- Dynamic Upload Form Logic ---
+        videoTypeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'movie') {
+                movieDetailsDiv.classList.remove('hidden');
+                seriesDetailsDiv.classList.add('hidden');
+            } else {
+                movieDetailsDiv.classList.add('hidden');
+                seriesDetailsDiv.classList.remove('hidden');
+            }
+        });
+
+        // --- Handle Movie and Episode Uploads ---
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Only allow the admin to upload
+            if (auth.currentUser.email !== adminEmail) {
+                showMessage('You do not have permission to upload videos.', 'error');
+                return;
+            }
+
+            const videoType = videoTypeSelect.value;
+            const publicId = e.target.publicId.value.trim();
+            const title = e.target.title.value.trim();
+            const description = e.target.description.value.trim();
+            
+            if (!publicId || !title || !description) {
+                showMessage('Please fill in all fields.', 'error');
+                return;
+            }
+
+            try {
+                const videoMetadata = {
+                    title,
+                    description,
+                    // Save the Cloudinary public ID instead of a full URL
+                    publicId,
+                    uploaderEmail: auth.currentUser.email,
+                    createdAt: new Date()
+                };
+
+                if (videoType === 'movie') {
+                    const moviesCollectionRef = collection(db, `artifacts/${appId}/public/data/movies`);
+                    await addDoc(moviesCollectionRef, videoMetadata);
+                    showMessage('Movie details saved!', 'success');
+                } else if (videoType === 'series') {
+                    const seriesTitle = e.target.seriesTitle.value.trim();
+                    const episodeNumber = e.target.episodeNumber.value.trim();
+                    if (!seriesTitle || !episodeNumber) {
+                        showMessage('Please provide a Series Title and Episode Number.', 'error');
+                        return;
+                    }
+                    
+                    // Check if series exists
+                    const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
+                    const q = query(seriesRef, where("title", "==", seriesTitle));
+                    const seriesDocs = await getDocs(q);
+
+                    let seriesId;
+                    if (seriesDocs.empty) {
+                        const newSeriesRef = await addDoc(seriesRef, { title: seriesTitle });
+                        seriesId = newSeriesRef.id;
+                    } else {
+                        seriesId = seriesDocs.docs[0].id;
+                    }
+                    
+                    const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                    await addDoc(episodesCollectionRef, { ...videoMetadata, episodeNumber: parseInt(episodeNumber, 10) });
+                    showMessage('Episode details saved!', 'success');
+                }
+                uploadForm.reset();
+            } catch (error) {
+                console.error(error);
+                showMessage(`Failed to save video metadata: ${error.message}`, 'error');
+            }
+        });
+
+        // --- Video Player and Episode List Modals Logic ---
+        document.addEventListener('click', async (e) => {
+            // Play a movie
+            if (e.target.classList.contains('play-btn')) {
+                const videoURL = e.target.dataset.url;
+                videoPlayer.src = videoURL;
+                videoPlayerModal.classList.remove('hidden');
+            }
+
+            // View episodes for a series
+            if (e.target.classList.contains('view-episodes-btn')) {
+                const seriesId = e.target.dataset.seriesId;
+                const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                const episodesSnapshot = await getDocs(episodesCollectionRef);
+                
+                episodeListContainer.innerHTML = '';
+                episodesSnapshot.forEach(doc => {
+                    const episode = doc.data();
+                    const publicId = episode.publicId; // Get the publicId from the Firestore document
+                    const videoURL = getCloudinaryVideoUrl(publicId); // Generate the URL
+                    const episodeItem = document.createElement('div');
+                    episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
+                    episodeItem.innerHTML = `
+                        <div>
+                            <h4 class="text-xl font-semibold">${episode.title} - S1 E${episode.episodeNumber}</h4>
+                            <p class="text-gray-400 text-sm">${episode.description}</p>
+                        </div>
+                        <button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-full" data-url="${videoURL}">Play</button>
+                    `;
+                    episodeListContainer.appendChild(episodeItem);
+                });
+                episodeListModal.classList.remove('hidden');
+            }
+
+            // Close the video player modal
+            if (e.target.id === 'close-video-modal-btn') {
+                videoPlayer.pause();
+                videoPlayer.src = '';
+                videoPlayerModal.classList.add('hidden');
+            }
+            
+            // Close the episode list modal
+            if (e.target.id === 'close-episode-modal-btn') {
+                episodeListModal.classList.add('hidden');
+            }
+        });
+
+        // --- Tab switching logic ---
+        moviesTabBtn.addEventListener('click', () => switchTab('movies'));
+        seriesTabBtn.addEventListener('click', () => switchTab('series'));
+
+        // --- Initial Auth Check ---
+        const signInWithCustomTokenOnLoad = async () => {
+            if (initialAuthToken) {
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } catch (error) {
+                    console.error('Error signing in with custom token:', error);
+                    // Fallback to anonymous sign-in if custom token fails
+                    await signInAnonymously(auth);
+                }
+            } else {
+                 await signInAnonymously(auth);
+            }
+        };
+        signInWithCustomTokenOnLoad();
+    </script>
+
+    <!-- App Container -->
+    <div class="container mx-auto py-8">
+
+        <!-- Header -->
+        <header class="text-center mb-12">
+            <h1 class="text-5xl font-extrabold text-white tracking-tight">StreamVault</h1>
+            <p class="mt-4 text-xl text-gray-400">Your personal streaming service</p>
+        </header>
+
+        <!-- Dynamic Message Box -->
+        <div id="message-box" class="message-box space-y-4"></div>
+
+        <!-- Authentication Section (Initially Visible) -->
+        <div id="auth-container" class="max-w-md mx-auto p-8 bg-gray-800 rounded-2xl shadow-xl">
+            <h2 class="text-3xl font-bold text-center text-white mb-6">Sign In</h2>
+            <button id="google-signin-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center space-x-2">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.27H12v4.51h6.24c-.26 1.43-1.04 2.65-2.27 3.48v2.98h3.84c2.25-2.07 3.56-5.11 3.56-8.7H22.56z" fill="#4285F4"/>
+                    <path d="M12 23.99c2.72 0 4.97-.9 6.63-2.45l-3.84-2.98c-1.07.72-2.43 1.15-3.79 1.15-2.93 0-5.41-1.98-6.3-4.63H1.83v2.98c1.78 3.52 5.37 6.08 10.17 6.08z" fill="#34A853"/>
+                    <path d="M5.7 14.86c-.22-.64-.34-1.32-.34-2.02s.12-1.38.34-2.02V8.84H1.83C1.09 10.37.75 12.11.75 12.99s.34 2.62 1.08 4.15l3.87-2.02z" fill="#FBBC05"/>
+                    <path d="M12 5.01c1.47 0 2.76.5 3.79 1.47l3.39-3.39C16.97 1.8 14.72.75 12 .75 7.21.75 3.62 3.31 1.83 6.83l3.87 2.98c.89-2.65 3.37-4.62 6.3-4.62z" fill="#EA4335"/>
+                </svg>
+                <span>Sign in with Google</span>
+            </button>
+        </div>
+
+        <!-- Main App Section (Hidden until login) -->
+        <div id="main-container" class="hidden">
+            <!-- User Info and Sign Out -->
+            <div class="flex justify-end items-center bg-gray-800 p-6 rounded-xl shadow-lg mb-8">
+                <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200">
+                    Sign Out
+                </button>
+            </div>
+
+            <!-- Video Upload Section (Hidden for non-admin) -->
+            <div id="upload-section" class="max-w-2xl mx-auto mb-12 hidden">
+                <div class="bg-gray-800 p-8 rounded-2xl shadow-xl">
+                    <h2 class="text-3xl font-bold text-white mb-6 text-center">Upload a Video</h2>
+                    <form id="upload-form" class="space-y-6">
+                        <div>
+                            <label for="videoType" class="block text-sm font-medium text-gray-300 mb-1">Content Type</label>
+                            <select id="videoType" name="videoType" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                                <option value="movie">Movie</option>
+                                <option value="series">TV Series</option>
+                            </select>
+                        </div>
+
+                        <!-- General details for both movie and series -->
+                         <div>
+                            <label for="publicId" class="block text-sm font-medium text-gray-300 mb-1">Cloudinary Public ID</label>
+                            <input type="text" id="publicId" name="publicId" required class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" placeholder="Enter the Cloudinary public ID here">
+                        </div>
+
+                        <!-- Movie details (default) -->
+                        <div id="movie-details">
+                            <div>
+                                <label for="title" class="block text-sm font-medium text-gray-300 mb-1">Movie Title</label>
+                                <input type="text" id="title" name="title" required class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                            </div>
+                            <div>
+                                <label for="description" class="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                                <textarea id="description" name="description" rows="3" required class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Series details (hidden by default) -->
+                        <div id="series-details" class="hidden">
+                             <div>
+                                <label for="seriesTitle" class="block text-sm font-medium text-gray-300 mb-1">Series Title</label>
+                                <input type="text" id="seriesTitle" name="seriesTitle" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                            </div>
+                            <div>
+                                <label for="episodeNumber" class="block text-sm font-medium text-gray-300 mb-1">Episode Number</label>
+                                <input type="number" id="episodeNumber" name="episodeNumber" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                            </div>
+                            <div>
+                                <label for="title-series" class="block text-sm font-medium text-gray-300 mb-1">Episode Title</label>
+                                <input type="text" id="title-series" name="title-series" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                            </div>
+                            <div>
+                                <label for="description-series" class="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                                <textarea id="description-series" name="description-series" rows="3" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"></textarea>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-700 transition-colors duration-200">
+                            Save Content
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Video List Tabs -->
+            <div class="flex justify-center mb-8">
+                <button id="movies-tab" class="tab-button active px-6 py-3 rounded-l-lg font-bold text-gray-300 hover:bg-gray-700 transition-colors duration-200">Movies</button>
+                <button id="series-tab" class="tab-button px-6 py-3 rounded-r-lg font-bold text-gray-300 hover:bg-gray-700 transition-colors duration-200">TV Series</button>
+            </div>
+
+            <!-- Video Containers -->
+            <div id="movies-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Movie cards will be dynamically inserted here -->
+            </div>
+            <div id="series-container" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- TV Series cards will be dynamically inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Player Modal -->
+    <div id="video-player-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="relative w-full max-w-4xl h-auto bg-gray-900 rounded-xl shadow-2xl p-4">
+            <button id="close-video-modal-btn" class="absolute top-2 right-2 text-white bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-lg hover:bg-gray-700 transition-colors duration-200">
+                &times;
+            </button>
+            <video id="video-player" controls class="w-full h-auto rounded-lg"></video>
+        </div>
+    </div>
+    
+    <!-- Episode List Modal -->
+    <div id="episode-list-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="relative w-full max-w-2xl h-auto bg-gray-900 rounded-xl shadow-2xl p-6">
+            <button id="close-episode-modal-btn" class="absolute top-2 right-2 text-white bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-lg hover:bg-gray-700 transition-colors duration-200">
+                &times;
+            </button>
+            <h3 class="text-3xl font-bold text-white mb-6 text-center">Episodes</h3>
+            <div id="episode-list-container" class="space-y-4">
+                <!-- Episode list will be dynamically inserted here -->
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
