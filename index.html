@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StreamVault</title>
-    <!-- Tailwind CSS CDN -->
+    <!-- Tailwind CSS CDN - Used for this self-contained demo. For production, install as a PostCSS plugin. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Inter Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -47,10 +47,20 @@
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        let app;
+        let auth;
+        let db;
+
+        // Check if firebaseConfig is valid before initializing
+        if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
+            // Initialize Firebase
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } else {
+            console.error("Firebase configuration is missing or invalid. App will not function correctly.");
+        }
+
 
         // --- IMPORTANT: CONFIGURATION FOR THE ADMIN'S GOOGLE EMAIL ---
         // This email address will be the only one able to upload videos.
@@ -182,245 +192,255 @@
         // --- Main Logic ---
 
         // Firebase Auth State Listener
-        onAuthStateChanged(auth, async (user) => {
-            console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
-            if (user) {
-                // If a user is signed in, show the main application.
-                mainContainer.classList.remove('hidden');
-                authContainer.classList.add('hidden');
+        // Check if `auth` and `db` are initialized before proceeding
+        if (auth && db) {
+            onAuthStateChanged(auth, async (user) => {
+                console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
+                if (user) {
+                    // If a user is signed in, show the main application.
+                    mainContainer.classList.remove('hidden');
+                    authContainer.classList.add('hidden');
 
-                const isGoogleUser = user.providerData.some(provider => provider.providerId === GoogleAuthProvider.PROVIDER_ID);
+                    const isGoogleUser = user.providerData.some(provider => provider.providerId === GoogleAuthProvider.PROVIDER_ID);
 
-                if (isGoogleUser) {
-                    signOutBtn.classList.remove('hidden');
-                    googleSignInBtn.classList.add('hidden');
-                    userStatusText.textContent = `Signed in as: ${user.email}`;
+                    if (isGoogleUser) {
+                        signOutBtn.classList.remove('hidden');
+                        googleSignInBtn.classList.add('hidden');
+                        userStatusText.textContent = `Signed in as: ${user.email}`;
 
-                    if (user.email === adminEmail) {
-                        showMessage('Welcome, Admin! You can now upload content.', 'success');
-                        uploadSection.classList.remove('hidden');
+                        if (user.email === adminEmail) {
+                            showMessage('Welcome, Admin! You can now upload content.', 'success');
+                            uploadSection.classList.remove('hidden');
+                        } else {
+                            uploadSection.classList.add('hidden');
+                            showMessage('Welcome back! You can now watch videos.', 'success');
+                        }
+
                     } else {
+                        signOutBtn.classList.add('hidden');
+                        googleSignInBtn.classList.remove('hidden');
                         uploadSection.classList.add('hidden');
-                        showMessage('Welcome back! You can now watch videos.', 'success');
+                        userStatusText.textContent = `Signed in anonymously`;
                     }
 
+                    // Set up real-time listeners for movies and series
+                    const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
+                    onSnapshot(moviesQuery, (querySnapshot) => {
+                        const movies = [];
+                        querySnapshot.forEach((doc) => {
+                            movies.push({ id: doc.id, ...doc.data() });
+                        });
+                        renderVideos(movies, moviesContainer, 'movie');
+                    }, (error) => {
+                        showMessage(`Error fetching movies: ${error.message}`, 'error');
+                        console.error('Firestore Error (movies):', error);
+                    });
+
+                    const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
+                    onSnapshot(seriesQuery, (querySnapshot) => {
+                        const series = [];
+                        querySnapshot.forEach((doc) => {
+                            series.push({ id: doc.id, ...doc.data() });
+                        });
+                        renderVideos(series, seriesContainer, 'series');
+                    }, (error) => {
+                        showMessage(`Error fetching series: ${error.message}`, 'error');
+                        console.error('Firestore Error (series):', error);
+                    });
                 } else {
+                    // If no user is signed in, show the authentication screen.
+                    mainContainer.classList.add('hidden');
+                    authContainer.classList.remove('hidden');
+                    userStatusText.textContent = ''; // Clear user status
                     signOutBtn.classList.add('hidden');
                     googleSignInBtn.classList.remove('hidden');
-                    uploadSection.classList.add('hidden');
-                    userStatusText.textContent = `Signed in anonymously`;
                 }
+            });
 
-                // Set up real-time listeners for movies and series
-                const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
-                onSnapshot(moviesQuery, (querySnapshot) => {
-                    const movies = [];
-                    querySnapshot.forEach((doc) => {
-                        movies.push({ id: doc.id, ...doc.data() });
-                    });
-                    renderVideos(movies, moviesContainer, 'movie');
-                }, (error) => {
-                    showMessage(`Error fetching movies: ${error.message}`, 'error');
-                    console.error('Firestore Error (movies):', error);
-                });
-
-                const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
-                onSnapshot(seriesQuery, (querySnapshot) => {
-                    const series = [];
-                    querySnapshot.forEach((doc) => {
-                        series.push({ id: doc.id, ...doc.data() });
-                    });
-                    renderVideos(series, seriesContainer, 'series');
-                }, (error) => {
-                    showMessage(`Error fetching series: ${error.message}`, 'error');
-                    console.error('Firestore Error (series):', error);
-                });
-            } else {
-                // If no user is signed in, show the authentication screen.
-                mainContainer.classList.add('hidden');
-                authContainer.classList.remove('hidden');
-                userStatusText.textContent = ''; // Clear user status
-                signOutBtn.classList.add('hidden');
-                googleSignInBtn.classList.remove('hidden');
-            }
-        });
-
-        // --- Authentication Logic ---
-        googleSignInBtn.addEventListener('click', async () => {
-            try {
-                console.log('Attempting Google sign-in...');
-                const provider = new GoogleAuthProvider();
-                await signInWithPopup(auth, provider);
-                showMessage('Signed in with Google successfully!', 'success');
-            } catch (error) {
-                console.error('Google sign-in failed:', error);
-                showMessage(`Google sign-in failed: ${error.message}`, 'error');
-            }
-        });
-
-        signOutBtn.addEventListener('click', async () => {
-            console.log('Attempting sign out...');
-            try {
-                await signOut(auth);
-                showMessage('Signed out successfully!', 'info');
-                // The onAuthStateChanged listener will handle the UI change
-            } catch (error) {
-                console.error('Sign out failed:', error);
-                showMessage(`Sign out failed: ${error.message}`, 'error');
-            }
-        });
-
-        // --- Dynamic Upload Form Logic ---
-        videoTypeSelect.addEventListener('change', (e) => {
-            if (e.target.value === 'movie') {
-                movieDetailsDiv.classList.remove('hidden');
-                seriesDetailsDiv.classList.add('hidden');
-            } else {
-                movieDetailsDiv.classList.add('hidden');
-                seriesDetailsDiv.classList.remove('hidden');
-            }
-        });
-
-        // --- Handle Movie and Episode Uploads ---
-        uploadForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            // Only allow the admin to upload
-            if (auth.currentUser.email !== adminEmail) {
-                showMessage('You do not have permission to upload videos.', 'error');
-                return;
-            }
-
-            const videoType = videoTypeSelect.value;
-            const publicId = e.target.publicId.value.trim();
-            const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
-            const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
-            
-            if (!publicId || !title || !description) {
-                showMessage('Please fill in all fields.', 'error');
-                return;
-            }
-
-            try {
-                const videoMetadata = {
-                    title,
-                    description,
-                    // Save the Cloudinary public ID instead of a full URL
-                    publicId,
-                    uploaderEmail: auth.currentUser.email,
-                    createdAt: new Date()
-                };
-
-                if (videoType === 'movie') {
-                    const moviesCollectionRef = collection(db, `artifacts/${appId}/public/data/movies`);
-                    await addDoc(moviesCollectionRef, videoMetadata);
-                    showMessage('Movie details saved!', 'success');
-                } else if (videoType === 'series') {
-                    const seriesTitle = e.target.seriesTitle.value.trim();
-                    const episodeNumber = e.target.episodeNumber.value.trim();
-                    if (!seriesTitle || !episodeNumber) {
-                        showMessage('Please provide a Series Title and Episode Number.', 'error');
-                        return;
-                    }
-                    
-                    // Check if series exists
-                    const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
-                    const q = query(seriesRef, where("title", "==", seriesTitle));
-                    const seriesDocs = await getDocs(q);
-
-                    let seriesId;
-                    if (seriesDocs.empty) {
-                        const newSeriesRef = await addDoc(seriesRef, { title: seriesTitle });
-                        seriesId = newSeriesRef.id;
-                    } else {
-                        seriesId = seriesDocs.docs[0].id;
-                    }
-                    
-                    const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
-                    await addDoc(episodesCollectionRef, { ...videoMetadata, episodeNumber: parseInt(episodeNumber, 10) });
-                    showMessage('Episode details saved!', 'success');
-                }
-                uploadForm.reset();
-            } catch (error) {
-                console.error(error);
-                showMessage(`Failed to save video metadata: ${error.message}`, 'error');
-            }
-        });
-
-        // --- Video Player and Episode List Modals Logic ---
-        document.addEventListener('click', async (e) => {
-            // Play a movie
-            if (e.target.classList.contains('play-btn')) {
-                const videoURL = e.target.dataset.url;
-                videoPlayer.src = videoURL;
-                videoPlayerModal.classList.remove('hidden');
-            }
-
-            // View episodes for a series
-            if (e.target.classList.contains('view-episodes-btn')) {
-                const seriesId = e.target.dataset.seriesId;
-                const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
-                const episodesSnapshot = await getDocs(episodesCollectionRef);
-                
-                episodeListContainer.innerHTML = '';
-                episodesSnapshot.forEach(doc => {
-                    const episode = doc.data();
-                    const publicId = episode.publicId; // Get the publicId from the Firestore document
-                    const videoURL = getCloudinaryVideoUrl(publicId); // Generate the URL
-                    const episodeItem = document.createElement('div');
-                    episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
-                    episodeItem.innerHTML = `
-                        <div>
-                            <h4 class="text-xl font-semibold">${episode.title} - S1 E${episode.episodeNumber}</h4>
-                            <p class="text-gray-400 text-sm">${episode.description}</p>
-                        </div>
-                        <button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-full" data-url="${videoURL}">Play</button>
-                    `;
-                    episodeListContainer.appendChild(episodeItem);
-                });
-                episodeListModal.classList.remove('hidden');
-            }
-
-            // Close the video player modal
-            if (e.target.id === 'close-video-modal-btn') {
-                videoPlayer.pause();
-                videoPlayer.src = '';
-                videoPlayerModal.classList.add('hidden');
-            }
-            
-            // Close the episode list modal
-            if (e.target.id === 'close-episode-modal-btn') {
-                episodeListModal.classList.add('hidden');
-            }
-        });
-
-        // --- Tab switching logic ---
-        moviesTabBtn.addEventListener('click', () => switchTab('movies'));
-        seriesTabBtn.addEventListener('click', () => switchTab('series'));
-
-        // --- Initial Auth Check ---
-        // The onAuthStateChanged listener is the canonical way to handle auth state.
-        // The `signInWithCustomToken` is called once outside the listener to bootstrap the initial anonymous session.
-        const signInWithCustomTokenOnLoad = async () => {
-            if (initialAuthToken) {
+            // --- Authentication Logic ---
+            googleSignInBtn.addEventListener('click', async () => {
                 try {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                    console.log("Signed in with custom token successfully.");
+                    console.log('Attempting Google sign-in...');
+                    const provider = new GoogleAuthProvider();
+                    await signInWithPopup(auth, provider);
+                    showMessage('Signed in with Google successfully!', 'success');
                 } catch (error) {
-                    console.error('Error signing in with custom token, falling back to anonymous:', error);
-                    try {
-                        await signInAnonymously(auth);
-                        console.log("Signed in anonymously.");
-                    } catch (anonError) {
-                        console.error('Failed to sign in anonymously:', anonError);
-                    }
+                    console.error('Google sign-in failed:', error);
+                    showMessage(`Google sign-in failed: ${error.message}`, 'error');
                 }
-            } else {
-                 await signInAnonymously(auth);
-                 console.log("Signed in anonymously (no initial token).");
-            }
-        };
-        signInWithCustomTokenOnLoad();
+            });
+
+            signOutBtn.addEventListener('click', async () => {
+                console.log('Attempting sign out...');
+                try {
+                    await signOut(auth);
+                    showMessage('Signed out successfully!', 'info');
+                    // The onAuthStateChanged listener will handle the UI change
+                } catch (error) {
+                    console.error('Sign out failed:', error);
+                    showMessage(`Sign out failed: ${error.message}`, 'error');
+                }
+            });
+
+            // --- Dynamic Upload Form Logic ---
+            videoTypeSelect.addEventListener('change', (e) => {
+                if (e.target.value === 'movie') {
+                    movieDetailsDiv.classList.remove('hidden');
+                    seriesDetailsDiv.classList.add('hidden');
+                } else {
+                    movieDetailsDiv.classList.add('hidden');
+                    seriesDetailsDiv.classList.remove('hidden');
+                }
+            });
+
+            // --- Handle Movie and Episode Uploads ---
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                // Only allow the admin to upload
+                if (auth.currentUser.email !== adminEmail) {
+                    showMessage('You do not have permission to upload videos.', 'error');
+                    return;
+                }
+
+                const videoType = videoTypeSelect.value;
+                const publicId = e.target.publicId.value.trim();
+                const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
+                const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
+                
+                if (!publicId || !title || !description) {
+                    showMessage('Please fill in all fields.', 'error');
+                    return;
+                }
+
+                try {
+                    const videoMetadata = {
+                        title,
+                        description,
+                        // Save the Cloudinary public ID instead of a full URL
+                        publicId,
+                        uploaderEmail: auth.currentUser.email,
+                        createdAt: new Date()
+                    };
+
+                    if (videoType === 'movie') {
+                        const moviesCollectionRef = collection(db, `artifacts/${appId}/public/data/movies`);
+                        await addDoc(moviesCollectionRef, videoMetadata);
+                        showMessage('Movie details saved!', 'success');
+                    } else if (videoType === 'series') {
+                        const seriesTitle = e.target.seriesTitle.value.trim();
+                        const episodeNumber = e.target.episodeNumber.value.trim();
+                        if (!seriesTitle || !episodeNumber) {
+                            showMessage('Please provide a Series Title and Episode Number.', 'error');
+                            return;
+                        }
+                        
+                        // Check if series exists
+                        const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
+                        const q = query(seriesRef, where("title", "==", seriesTitle));
+                        const seriesDocs = await getDocs(q);
+
+                        let seriesId;
+                        if (seriesDocs.empty) {
+                            const newSeriesRef = await addDoc(seriesRef, { title: seriesTitle });
+                            seriesId = newSeriesRef.id;
+                        } else {
+                            seriesId = seriesDocs.docs[0].id;
+                        }
+                        
+                        const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                        await addDoc(episodesCollectionRef, { ...videoMetadata, episodeNumber: parseInt(episodeNumber, 10) });
+                        showMessage('Episode details saved!', 'success');
+                    }
+                    uploadForm.reset();
+                } catch (error) {
+                    console.error(error);
+                    showMessage(`Failed to save video metadata: ${error.message}`, 'error');
+                }
+            });
+
+            // --- Video Player and Episode List Modals Logic ---
+            document.addEventListener('click', async (e) => {
+                // Play a movie
+                if (e.target.classList.contains('play-btn')) {
+                    const videoURL = e.target.dataset.url;
+                    videoPlayer.src = videoURL;
+                    videoPlayerModal.classList.remove('hidden');
+                }
+
+                // View episodes for a series
+                if (e.target.classList.contains('view-episodes-btn')) {
+                    const seriesId = e.target.dataset.seriesId;
+                    const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                    const episodesSnapshot = await getDocs(episodesCollectionRef);
+                    
+                    episodeListContainer.innerHTML = '';
+                    episodesSnapshot.forEach(doc => {
+                        const episode = doc.data();
+                        const publicId = episode.publicId; // Get the publicId from the Firestore document
+                        const videoURL = getCloudinaryVideoUrl(publicId); // Generate the URL
+                        const episodeItem = document.createElement('div');
+                        episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
+                        episodeItem.innerHTML = `
+                            <div>
+                                <h4 class="text-xl font-semibold">${episode.title} - S1 E${episode.episodeNumber}</h4>
+                                <p class="text-gray-400 text-sm">${episode.description}</p>
+                            </div>
+                            <button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-full" data-url="${videoURL}">Play</button>
+                        `;
+                        episodeListContainer.appendChild(episodeItem);
+                    });
+                    episodeListModal.classList.remove('hidden');
+                }
+
+                // Close the video player modal
+                if (e.target.id === 'close-video-modal-btn') {
+                    videoPlayer.pause();
+                    videoPlayer.src = '';
+                    videoPlayerModal.classList.add('hidden');
+                }
+                
+                // Close the episode list modal
+                if (e.target.id === 'close-episode-modal-btn') {
+                    episodeListModal.classList.add('hidden');
+                }
+            });
+
+            // --- Tab switching logic ---
+            moviesTabBtn.addEventListener('click', () => switchTab('movies'));
+            seriesTabBtn.addEventListener('click', () => switchTab('series'));
+
+            // --- Initial Auth Check ---
+            // The onAuthStateChanged listener is the canonical way to handle auth state.
+            // The `signInWithCustomToken` is called once outside the listener to bootstrap the initial anonymous session.
+            const signInWithCustomTokenOnLoad = async () => {
+                if (initialAuthToken) {
+                    try {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Signed in with custom token successfully.");
+                    } catch (error) {
+                        console.error('Error signing in with custom token, falling back to anonymous:', error);
+                        try {
+                            await signInAnonymously(auth);
+                            console.log("Signed in anonymously.");
+                        } catch (anonError) {
+                            console.error('Failed to sign in anonymously:', anonError);
+                        }
+                    }
+                } else {
+                     await signInAnonymously(auth);
+                     console.log("Signed in anonymously (no initial token).");
+                }
+            };
+            signInWithCustomTokenOnLoad();
+        } else {
+            // Handle case where Firebase is not initialized
+            document.addEventListener('DOMContentLoaded', () => {
+                authContainer.classList.remove('hidden');
+                mainContainer.classList.add('hidden');
+                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
+            });
+        }
     </script>
 
     <!-- App Container -->
