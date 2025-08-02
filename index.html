@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StreamVault</title>
-    <!-- Tailwind CSS CDN - Used for this self-contained demo. For production, install as a PostCSS plugin. -->
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Inter Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,7 +36,7 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name here
@@ -56,7 +56,6 @@
         
         // Hardcoded values for variables that would normally be provided by the environment.
         const appId = 'streamvault-app-id';
-        const initialAuthToken = null;
 
         let app;
         let auth;
@@ -402,22 +401,18 @@
             });
 
             // --- Initial Auth Check ---
-            const signInWithCustomTokenOnLoad = async () => {
+            // Simplified logic: always sign in anonymously to ensure the app loads.
+            // The Google sign-in button will handle the upgrade to a full account.
+            const signInOnLoad = async () => {
                 try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                        console.log("Signed in with custom token successfully.");
-                    } else {
-                         await signInAnonymously(auth);
-                         console.log("Signed in anonymously (no initial token).");
-                    }
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
                 } catch (error) {
-                    console.error('Failed to sign in:', error);
-                    // This is where a more user-friendly error message can be shown
-                    showMessage(`Authentication failed: ${error.message}`, 'error');
+                    console.error('Failed to sign in anonymously:', error);
+                    showMessage(`Anonymous authentication failed: ${error.message}`, 'error');
                 }
             };
-            signInWithCustomTokenOnLoad();
+            signInOnLoad();
         } else {
             // This part of the code will execute if the firebaseConfig object is empty or invalid
             document.addEventListener('DOMContentLoaded', () => {
