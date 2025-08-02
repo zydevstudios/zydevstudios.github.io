@@ -183,12 +183,12 @@
 
         // Firebase Auth State Listener
         onAuthStateChanged(auth, async (user) => {
+            console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
             if (user) {
                 // If a user is signed in, show the main application.
                 mainContainer.classList.remove('hidden');
                 authContainer.classList.add('hidden');
 
-                // Determine if the user is a Google-authenticated user
                 const isGoogleUser = user.providerData.some(provider => provider.providerId === GoogleAuthProvider.PROVIDER_ID);
 
                 if (isGoogleUser) {
@@ -196,7 +196,6 @@
                     googleSignInBtn.classList.add('hidden');
                     userStatusText.textContent = `Signed in as: ${user.email}`;
 
-                    // Check if the current user is the admin based on email
                     if (user.email === adminEmail) {
                         showMessage('Welcome, Admin! You can now upload content.', 'success');
                         uploadSection.classList.remove('hidden');
@@ -206,8 +205,6 @@
                     }
 
                 } else {
-                    // This case is for anonymous users (from the initial token).
-                    // They can still view content, but not upload.
                     signOutBtn.classList.add('hidden');
                     googleSignInBtn.classList.remove('hidden');
                     uploadSection.classList.add('hidden');
@@ -224,6 +221,7 @@
                     renderVideos(movies, moviesContainer, 'movie');
                 }, (error) => {
                     showMessage(`Error fetching movies: ${error.message}`, 'error');
+                    console.error('Firestore Error (movies):', error);
                 });
 
                 const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
@@ -235,33 +233,39 @@
                     renderVideos(series, seriesContainer, 'series');
                 }, (error) => {
                     showMessage(`Error fetching series: ${error.message}`, 'error');
+                    console.error('Firestore Error (series):', error);
                 });
             } else {
                 // If no user is signed in, show the authentication screen.
                 mainContainer.classList.add('hidden');
                 authContainer.classList.remove('hidden');
+                userStatusText.textContent = ''; // Clear user status
+                signOutBtn.classList.add('hidden');
+                googleSignInBtn.classList.remove('hidden');
             }
         });
 
         // --- Authentication Logic ---
         googleSignInBtn.addEventListener('click', async () => {
             try {
+                console.log('Attempting Google sign-in...');
                 const provider = new GoogleAuthProvider();
                 await signInWithPopup(auth, provider);
                 showMessage('Signed in with Google successfully!', 'success');
             } catch (error) {
-                console.error(error);
+                console.error('Google sign-in failed:', error);
                 showMessage(`Google sign-in failed: ${error.message}`, 'error');
             }
         });
 
         signOutBtn.addEventListener('click', async () => {
+            console.log('Attempting sign out...');
             try {
                 await signOut(auth);
                 showMessage('Signed out successfully!', 'info');
                 // The onAuthStateChanged listener will handle the UI change
             } catch (error) {
-                console.error(error);
+                console.error('Sign out failed:', error);
                 showMessage(`Sign out failed: ${error.message}`, 'error');
             }
         });
@@ -395,16 +399,25 @@
         seriesTabBtn.addEventListener('click', () => switchTab('series'));
 
         // --- Initial Auth Check ---
+        // The onAuthStateChanged listener is the canonical way to handle auth state.
+        // The `signInWithCustomToken` is called once outside the listener to bootstrap the initial anonymous session.
         const signInWithCustomTokenOnLoad = async () => {
             if (initialAuthToken) {
                 try {
                     await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token successfully.");
                 } catch (error) {
-                    console.error('Error signing in with custom token:', error);
-                    await signInAnonymously(auth);
+                    console.error('Error signing in with custom token, falling back to anonymous:', error);
+                    try {
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously.");
+                    } catch (anonError) {
+                        console.error('Failed to sign in anonymously:', anonError);
+                    }
                 }
             } else {
                  await signInAnonymously(auth);
+                 console.log("Signed in anonymously (no initial token).");
             }
         };
         signInWithCustomTokenOnLoad();
@@ -422,7 +435,7 @@
         <!-- User status and Sign-Out button section -->
         <div class="flex justify-between items-center p-6 bg-gray-800 rounded-xl shadow-lg mb-8">
             <p id="user-status" class="text-white text-lg font-semibold"></p>
-            <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200">
+            <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200 hidden">
                 Sign Out
             </button>
         </div>
