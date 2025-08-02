@@ -40,10 +40,11 @@
         import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name here
-        const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; // Replace with your Cloudinary cloud name
+        // This is a hardcoded value based on previous user input.
+        const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; 
+        const CLOUDINARY_UPLOAD_PRESET = 'k0qg4n92'; // A generic upload preset is used here. You may need to create one in your Cloudinary account.
 
         // Hardcoded Firebase configuration from the user's input.
-        // This version bypasses any reliance on environment variables for configuration.
         const firebaseConfig = {
             apiKey: "AIzaSyAWQzVqIzVT6-d8xw-1SfVlXzPLWsik_t0",
             authDomain: "streamer-3cf9b.firebaseapp.com",
@@ -98,6 +99,7 @@
         const episodeListModal = document.getElementById('episode-list-modal');
         const episodeListContainer = document.getElementById('episode-list-container');
         const userStatusText = document.getElementById('user-status');
+        const uploadButton = document.getElementById('upload-button');
         
         let currentActiveTab = 'movies';
 
@@ -230,11 +232,12 @@
                         console.error('Firestore Error (series):', error);
                     });
                 } else {
-                    mainContainer.classList.add('hidden');
+                    mainContainer.classList.remove('hidden'); // Show main content in a read-only mode
                     authContainer.classList.remove('hidden');
-                    userStatusText.textContent = ''; // Clear user status
+                    userStatusText.textContent = 'You are not signed in.';
                     signOutBtn.classList.add('hidden');
                     googleSignInBtn.classList.remove('hidden');
+                    uploadSection.classList.add('hidden');
                 }
             });
 
@@ -247,7 +250,11 @@
                     showMessage('Signed in with Google successfully!', 'success');
                 } catch (error) {
                     console.error('Google sign-in failed:', error);
-                    showMessage(`Google sign-in failed: ${error.message}`, 'error');
+                    if (error.code === 'auth/unauthorized-domain') {
+                        showMessage('Google sign-in failed. Please add this domain to your Firebase authorized domains list to fix this.', 'error');
+                    } else {
+                        showMessage(`Google sign-in failed: ${error.message}`, 'error');
+                    }
                 }
             });
 
@@ -283,16 +290,46 @@
                 }
 
                 const videoType = videoTypeSelect.value;
-                const publicId = e.target.publicId.value.trim();
+                const fileInput = document.getElementById('file-input');
+                const file = fileInput.files[0];
+                
+                if (!file) {
+                    showMessage('Please select a video file to upload.', 'error');
+                    return;
+                }
+
                 const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
                 const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
                 
-                if (!publicId || !title || !description) {
+                if (!title || !description) {
                     showMessage('Please fill in all fields.', 'error');
                     return;
                 }
 
+                // Show a loading message and disable the button
+                uploadButton.textContent = 'Uploading...';
+                uploadButton.disabled = true;
+                showMessage('Uploading video to Cloudinary. This may take a moment...', 'info');
+
                 try {
+                    // Upload file to Cloudinary
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+                    const cloudinaryResponse = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!cloudinaryResponse.ok) {
+                        throw new Error('Cloudinary upload failed.');
+                    }
+
+                    const cloudinaryData = await cloudinaryResponse.json();
+                    const publicId = cloudinaryData.public_id;
+
+                    // Save video metadata to Firestore
                     const videoMetadata = {
                         title,
                         description,
@@ -333,6 +370,9 @@
                 } catch (error) {
                     console.error(error);
                     showMessage(`Failed to save video metadata: ${error.message}`, 'error');
+                } finally {
+                    uploadButton.textContent = 'Save Content';
+                    uploadButton.disabled = false;
                 }
             });
 
@@ -409,7 +449,8 @@
                     console.log("Signed in anonymously.");
                 } catch (error) {
                     console.error('Failed to sign in anonymously:', error);
-                    showMessage(`Anonymous authentication failed: ${error.message}`, 'error');
+                    // This error is likely due to project settings and cannot be fixed in code.
+                    showMessage('Anonymous authentication failed. Please check your Firebase project settings.', 'error');
                 }
             };
             signInOnLoad();
@@ -464,18 +505,19 @@
                 <div class="bg-gray-800 p-8 rounded-2xl shadow-xl">
                     <h2 class="text-3xl font-bold text-white mb-6 text-center">Upload a Video</h2>
                     <form id="upload-form" class="space-y-6">
+                        <!-- File Upload Input -->
+                        <div>
+                            <label for="file-input" class="block text-sm font-medium text-gray-300 mb-1">Select Video File</label>
+                            <input type="file" id="file-input" name="file-input" accept="video/*" required class="w-full text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        </div>
+
+                        <!-- Content Type and Details -->
                         <div>
                             <label for="videoType" class="block text-sm font-medium text-gray-300 mb-1">Content Type</label>
                             <select id="videoType" name="videoType" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
                                 <option value="movie">Movie</option>
                                 <option value="series">TV Series</option>
                             </select>
-                        </div>
-
-                        <!-- General details for both movie and series -->
-                         <div>
-                            <label for="publicId" class="block text-sm font-medium text-gray-300 mb-1">Cloudinary Public ID</label>
-                            <input type="text" id="publicId" name="publicId" required class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white" placeholder="Enter the Cloudinary public ID here">
                         </div>
 
                         <!-- Movie details (default) -->
@@ -510,7 +552,7 @@
                             </div>
                         </div>
 
-                        <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-700 transition-colors duration-200">
+                        <button type="submit" id="upload-button" class="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-700 transition-colors duration-200">
                             Save Content
                         </button>
                     </form>
