@@ -36,7 +36,7 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name here
@@ -156,7 +156,6 @@
                 
                 let buttonHTML = '';
                 if (type === 'movie') {
-                    // Generate the video URL here from the stored publicId
                     const videoURL = getCloudinaryVideoUrl(video.publicId);
                     buttonHTML = `<button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-colors duration-300" data-url="${videoURL}">Watch Now</button>`;
                 } else if (type === 'series') {
@@ -166,7 +165,8 @@
                 videoCard.innerHTML = `
                     <div>
                         <h3 class="text-2xl font-bold mb-2 text-white">${video.title}</h3>
-                        <p class="text-gray-400 text-sm mb-4">${video.description}</p>
+                        <p class="text-gray-400 text-sm mb-2">${video.description}</p>
+                        <p class="text-gray-500 text-xs mt-2">ID: ${video.id}</p>
                     </div>
                     ${buttonHTML}
                 `;
@@ -184,27 +184,15 @@
                 if (user) {
                     mainContainer.classList.remove('hidden');
                     authContainer.classList.add('hidden');
+                    signOutBtn.classList.remove('hidden');
 
-                    const isGoogleUser = user.providerData.some(provider => provider.providerId === GoogleAuthProvider.PROVIDER_ID);
-
-                    if (isGoogleUser) {
-                        signOutBtn.classList.remove('hidden');
-                        googleSignInBtn.classList.add('hidden');
-                        userStatusText.textContent = `Signed in as: ${user.email}`;
-
-                        if (user.email === adminEmail) {
-                            showMessage('Welcome, Admin! You can now upload content.', 'success');
-                            uploadSection.classList.remove('hidden');
-                        } else {
-                            uploadSection.classList.add('hidden');
-                            showMessage('Welcome back! You can now watch videos.', 'success');
-                        }
-
+                    if (user.email === adminEmail) {
+                        showMessage('Welcome, Admin! You can now upload content.', 'success');
+                        uploadSection.classList.remove('hidden');
+                        userStatusText.textContent = `Signed in as: ${user.email} (Admin)`;
                     } else {
-                        signOutBtn.classList.add('hidden');
-                        googleSignInBtn.classList.remove('hidden');
                         uploadSection.classList.add('hidden');
-                        userStatusText.textContent = `Signed in anonymously`;
+                        userStatusText.textContent = `Signed in as: ${user.email}`;
                     }
 
                     // Set up real-time listeners for movies and series
@@ -231,12 +219,12 @@
                         showMessage(`Error fetching series: ${error.message}`, 'error');
                         console.error('Firestore Error (series):', error);
                     });
+
                 } else {
                     mainContainer.classList.remove('hidden'); // Show main content in a read-only mode
                     authContainer.classList.remove('hidden');
                     userStatusText.textContent = 'You are not signed in.';
                     signOutBtn.classList.add('hidden');
-                    googleSignInBtn.classList.remove('hidden');
                     uploadSection.classList.add('hidden');
                 }
             });
@@ -378,6 +366,20 @@
 
             // --- Video Player and Episode List Modals Logic ---
             document.addEventListener('click', async (e) => {
+                // Close the video player modal
+                if (e.target.id === 'close-video-modal-btn' || e.target.closest('#close-video-modal-btn')) {
+                    videoPlayer.pause();
+                    videoPlayer.src = '';
+                    videoPlayerModal.classList.add('hidden');
+                    return;
+                }
+                
+                // Close the episode list modal
+                if (e.target.id === 'close-episode-modal-btn' || e.target.closest('#close-episode-modal-btn')) {
+                    episodeListModal.classList.add('hidden');
+                    return;
+                }
+
                 // Play a movie
                 if (e.target.classList.contains('play-btn')) {
                     const videoURL = e.target.dataset.url;
@@ -387,7 +389,7 @@
 
                 // View episodes for a series
                 if (e.target.classList.contains('view-episodes-btn')) {
-                    const seriesId = e.target.dataset.seriesId;
+                    const seriesId = e.target.dataset.series-id;
                     const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
                     const episodesSnapshot = await getDocs(episodesCollectionRef);
                     
@@ -409,18 +411,6 @@
                     });
                     episodeListModal.classList.remove('hidden');
                 }
-
-                // Close the video player modal
-                if (e.target.id === 'close-video-modal-btn') {
-                    videoPlayer.pause();
-                    videoPlayer.src = '';
-                    videoPlayerModal.classList.add('hidden');
-                }
-                
-                // Close the episode list modal
-                if (e.target.id === 'close-episode-modal-btn') {
-                    episodeListModal.classList.add('hidden');
-                }
             });
 
             // --- Tab switching logic ---
@@ -439,21 +429,6 @@
                 seriesContainer.classList.remove('hidden');
                 moviesContainer.classList.add('hidden');
             });
-
-            // --- Initial Auth Check ---
-            // Simplified logic: always sign in anonymously to ensure the app loads.
-            // The Google sign-in button will handle the upgrade to a full account.
-            const signInOnLoad = async () => {
-                try {
-                    await signInAnonymously(auth);
-                    console.log("Signed in anonymously.");
-                } catch (error) {
-                    console.error('Failed to sign in anonymously:', error);
-                    // This error is likely due to project settings and cannot be fixed in code.
-                    showMessage('Anonymous authentication failed. Please check your Firebase project settings.', 'error');
-                }
-            };
-            signInOnLoad();
         } else {
             // This part of the code will execute if the firebaseConfig object is empty or invalid
             document.addEventListener('DOMContentLoaded', () => {
@@ -475,7 +450,7 @@
         
         <!-- User status and Sign-Out button section -->
         <div class="flex justify-between items-center p-6 bg-gray-800 rounded-xl shadow-lg mb-8">
-            <p id="user-status" class="text-white text-lg font-semibold"></p>
+            <p id="user-status" class="text-white text-lg font-semibold">Please sign in.</p>
             <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200 hidden">
                 Sign Out
             </button>
@@ -485,7 +460,7 @@
         <div id="message-box" class="message-box space-y-4"></div>
 
         <!-- Authentication Section (Initially Hidden) -->
-        <div id="auth-container" class="max-w-md mx-auto p-8 bg-gray-800 rounded-2xl shadow-xl hidden">
+        <div id="auth-container" class="max-w-md mx-auto p-8 bg-gray-800 rounded-2xl shadow-xl">
             <h2 class="text-3xl font-bold text-center text-white mb-6">Sign In</h2>
             <button id="google-signin-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center space-x-2">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
@@ -498,7 +473,7 @@
             </button>
         </div>
 
-        <!-- Main App Section (Hidden until login) -->
+        <!-- Main App Section (Initially Hidden) -->
         <div id="main-container" class="hidden">
             <!-- Video Upload Section (Hidden for non-admin) -->
             <div id="upload-section" class="max-w-2xl mx-auto mb-12 hidden">
