@@ -50,6 +50,7 @@
         let app;
         let auth;
         let db;
+        let isFirebaseInitialized = false;
 
         // Check if firebaseConfig is valid before initializing
         if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
@@ -57,8 +58,15 @@
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             db = getFirestore(app);
+            isFirebaseInitialized = true;
         } else {
             console.error("Firebase configuration is missing or invalid. App will not function correctly.");
+            document.addEventListener('DOMContentLoaded', () => {
+                const messageBox = document.getElementById('message-box');
+                const authContainer = document.getElementById('auth-container');
+                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
+                authContainer.classList.remove('hidden');
+            });
         }
 
 
@@ -96,6 +104,7 @@
          * @param {string} type The type of message (e.g., 'success', 'error', 'info').
          */
         const showMessage = (message, type = 'info') => {
+            if (!messageBox) return; // Guard against messageBox not being in the DOM yet
             const el = document.createElement('div');
             el.className = `p-4 rounded-lg shadow-lg mb-4 transform transition-transform duration-300 ease-out translate-x-0`;
             if (type === 'success') {
@@ -121,36 +130,6 @@
          */
         const getCloudinaryVideoUrl = (publicId) => {
             return `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/video/upload/f_auto/q_auto/${publicId}`;
-        };
-
-        /**
-         * Hides all main application sections and shows the specified one.
-         * @param {HTMLElement} element The element to show.
-         */
-        const showSection = (element) => {
-            [authContainer, mainContainer].forEach(el => el.classList.add('hidden'));
-            if (element) {
-                element.classList.remove('hidden');
-            }
-        };
-
-        /**
-         * Toggles between Movies and TV Series tabs.
-         * @param {string} tabName 'movies' or 'series'.
-         */
-        const switchTab = (tabName) => {
-            currentActiveTab = tabName;
-            if (tabName === 'movies') {
-                moviesTabBtn.classList.add('active');
-                seriesTabBtn.classList.remove('active');
-                moviesContainer.classList.remove('hidden');
-                seriesContainer.classList.add('hidden');
-            } else {
-                seriesTabBtn.classList.add('active');
-                moviesTabBtn.classList.remove('active');
-                seriesContainer.classList.remove('hidden');
-                moviesContainer.classList.add('hidden');
-            }
         };
 
         /**
@@ -191,13 +170,12 @@
 
         // --- Main Logic ---
 
-        // Firebase Auth State Listener
-        // Check if `auth` and `db` are initialized before proceeding
-        if (auth && db) {
+        // Only proceed if Firebase was successfully initialized
+        if (isFirebaseInitialized) {
+            // Firebase Auth State Listener
             onAuthStateChanged(auth, async (user) => {
                 console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
                 if (user) {
-                    // If a user is signed in, show the main application.
                     mainContainer.classList.remove('hidden');
                     authContainer.classList.add('hidden');
 
@@ -248,7 +226,6 @@
                         console.error('Firestore Error (series):', error);
                     });
                 } else {
-                    // If no user is signed in, show the authentication screen.
                     mainContainer.classList.add('hidden');
                     authContainer.classList.remove('hidden');
                     userStatusText.textContent = ''; // Clear user status
@@ -275,7 +252,6 @@
                 try {
                     await signOut(auth);
                     showMessage('Signed out successfully!', 'info');
-                    // The onAuthStateChanged listener will handle the UI change
                 } catch (error) {
                     console.error('Sign out failed:', error);
                     showMessage(`Sign out failed: ${error.message}`, 'error');
@@ -297,8 +273,7 @@
             uploadForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
 
-                // Only allow the admin to upload
-                if (auth.currentUser.email !== adminEmail) {
+                if (!auth.currentUser || auth.currentUser.email !== adminEmail) {
                     showMessage('You do not have permission to upload videos.', 'error');
                     return;
                 }
@@ -317,7 +292,6 @@
                     const videoMetadata = {
                         title,
                         description,
-                        // Save the Cloudinary public ID instead of a full URL
                         publicId,
                         uploaderEmail: auth.currentUser.email,
                         createdAt: new Date()
@@ -335,7 +309,6 @@
                             return;
                         }
                         
-                        // Check if series exists
                         const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
                         const q = query(seriesRef, where("title", "==", seriesTitle));
                         const seriesDocs = await getDocs(q);
@@ -377,8 +350,8 @@
                     episodeListContainer.innerHTML = '';
                     episodesSnapshot.forEach(doc => {
                         const episode = doc.data();
-                        const publicId = episode.publicId; // Get the publicId from the Firestore document
-                        const videoURL = getCloudinaryVideoUrl(publicId); // Generate the URL
+                        const publicId = episode.publicId; 
+                        const videoURL = getCloudinaryVideoUrl(publicId);
                         const episodeItem = document.createElement('div');
                         episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
                         episodeItem.innerHTML = `
@@ -407,39 +380,39 @@
             });
 
             // --- Tab switching logic ---
-            moviesTabBtn.addEventListener('click', () => switchTab('movies'));
-            seriesTabBtn.addEventListener('click', () => switchTab('series'));
+            moviesTabBtn.addEventListener('click', () => {
+                currentActiveTab = 'movies';
+                moviesTabBtn.classList.add('active');
+                seriesTabBtn.classList.remove('active');
+                moviesContainer.classList.remove('hidden');
+                seriesContainer.classList.add('hidden');
+            });
+
+            seriesTabBtn.addEventListener('click', () => {
+                currentActiveTab = 'series';
+                seriesTabBtn.classList.add('active');
+                moviesTabBtn.classList.remove('active');
+                seriesContainer.classList.remove('hidden');
+                moviesContainer.classList.add('hidden');
+            });
 
             // --- Initial Auth Check ---
-            // The onAuthStateChanged listener is the canonical way to handle auth state.
-            // The `signInWithCustomToken` is called once outside the listener to bootstrap the initial anonymous session.
             const signInWithCustomTokenOnLoad = async () => {
-                if (initialAuthToken) {
-                    try {
+                try {
+                    if (initialAuthToken) {
                         await signInWithCustomToken(auth, initialAuthToken);
                         console.log("Signed in with custom token successfully.");
-                    } catch (error) {
-                        console.error('Error signing in with custom token, falling back to anonymous:', error);
-                        try {
-                            await signInAnonymously(auth);
-                            console.log("Signed in anonymously.");
-                        } catch (anonError) {
-                            console.error('Failed to sign in anonymously:', anonError);
-                        }
+                    } else {
+                         await signInAnonymously(auth);
+                         console.log("Signed in anonymously (no initial token).");
                     }
-                } else {
-                     await signInAnonymously(auth);
-                     console.log("Signed in anonymously (no initial token).");
+                } catch (error) {
+                    console.error('Failed to sign in:', error);
+                    // This is where a more user-friendly error message can be shown
+                    showMessage(`Authentication failed: ${error.message}`, 'error');
                 }
             };
             signInWithCustomTokenOnLoad();
-        } else {
-            // Handle case where Firebase is not initialized
-            document.addEventListener('DOMContentLoaded', () => {
-                authContainer.classList.remove('hidden');
-                mainContainer.classList.add('hidden');
-                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
-            });
         }
     </script>
 
