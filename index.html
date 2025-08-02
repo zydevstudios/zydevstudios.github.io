@@ -42,10 +42,21 @@
         // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name here
         const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; // Replace with your Cloudinary cloud name
 
-        // Global variables for Firebase configuration provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // Hardcoded Firebase configuration from the user's input.
+        // This version bypasses any reliance on environment variables for configuration.
+        const firebaseConfig = {
+            apiKey: "AIzaSyAWQzVqIzVT6-d8xw-1SfVlXzPLWsik_t0",
+            authDomain: "streamer-3cf9b.firebaseapp.com",
+            projectId: "streamer-3cf9b",
+            storageBucket: "streamer-3cf9b.firebasestorage.app",
+            messagingSenderId: "661085685654",
+            appId: "1:661085685654:web:76d44a02c7d40964fbffb7",
+            measurementId: "G-QZGEPNDB2G"
+        };
+        
+        // Hardcoded values for variables that would normally be provided by the environment.
+        const appId = 'streamvault-app-id';
+        const initialAuthToken = null;
 
         let app;
         let auth;
@@ -53,7 +64,7 @@
         let isFirebaseInitialized = false;
 
         // Check if firebaseConfig is valid before initializing
-        if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
+        if (firebaseConfig && Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) {
             // Initialize Firebase
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
@@ -61,12 +72,6 @@
             isFirebaseInitialized = true;
         } else {
             console.error("Firebase configuration is missing or invalid. App will not function correctly.");
-            document.addEventListener('DOMContentLoaded', () => {
-                const messageBox = document.getElementById('message-box');
-                const authContainer = document.getElementById('auth-container');
-                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
-                authContainer.classList.remove('hidden');
-            });
         }
 
 
@@ -413,6 +418,13 @@
                 }
             };
             signInWithCustomTokenOnLoad();
+        } else {
+            // This part of the code will execute if the firebaseConfig object is empty or invalid
+            document.addEventListener('DOMContentLoaded', () => {
+                authContainer.classList.remove('hidden');
+                mainContainer.classList.add('hidden');
+                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
+            });
         }
     </script>
 
