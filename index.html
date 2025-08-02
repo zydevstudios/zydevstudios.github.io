@@ -40,11 +40,11 @@
         import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name and Upload Preset here.
-        // The Cloud Name 'dvvzifhg2' is based on previous user input.
         const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; 
-        // The preset 'k0qg4n92' is also based on previous user input. If this is not working, 
-        // you MUST create a new UNSIGNED preset in your Cloudinary account and replace this value.
-        const CLOUDINARY_UPLOAD_PRESET = 'k0qg4n92'; 
+        // ----------------------------------------------------------------------------------------------------
+        // IMPORTANT: The upload preset name has been updated based on your input.
+        // ----------------------------------------------------------------------------------------------------
+        const CLOUDINARY_UPLOAD_PRESET = 'stream'; 
 
         // Hardcoded Firebase configuration from the user's input.
         const firebaseConfig = {
