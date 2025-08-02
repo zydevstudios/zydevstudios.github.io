@@ -1,10 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-		<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
-		<script type="text/javascript" src="app.js"></script>
-		<link rel="stylesheet" href="app.css" type="text/css" />
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StreamVault</title>
@@ -79,6 +75,7 @@
         const videoPlayer = document.getElementById('video-player');
         const episodeListModal = document.getElementById('episode-list-modal');
         const episodeListContainer = document.getElementById('episode-list-container');
+        const userStatusText = document.getElementById('user-status');
         
         let currentActiveTab = 'movies';
 
@@ -187,17 +184,36 @@
         // Firebase Auth State Listener
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                showSection(mainContainer);
+                // If a user is signed in, show the main application.
+                mainContainer.classList.remove('hidden');
+                authContainer.classList.add('hidden');
 
-                // Check if the current user is the admin based on email
-                if (user.email === adminEmail) {
-                    showMessage('Welcome, Admin! You can now upload content.', 'success');
-                    uploadSection.classList.remove('hidden');
+                // Determine if the user is a Google-authenticated user
+                const isGoogleUser = user.providerData.some(provider => provider.providerId === GoogleAuthProvider.PROVIDER_ID);
+
+                if (isGoogleUser) {
+                    signOutBtn.classList.remove('hidden');
+                    googleSignInBtn.classList.add('hidden');
+                    userStatusText.textContent = `Signed in as: ${user.email}`;
+
+                    // Check if the current user is the admin based on email
+                    if (user.email === adminEmail) {
+                        showMessage('Welcome, Admin! You can now upload content.', 'success');
+                        uploadSection.classList.remove('hidden');
+                    } else {
+                        uploadSection.classList.add('hidden');
+                        showMessage('Welcome back! You can now watch videos.', 'success');
+                    }
+
                 } else {
+                    // This case is for anonymous users (from the initial token).
+                    // They can still view content, but not upload.
+                    signOutBtn.classList.add('hidden');
+                    googleSignInBtn.classList.remove('hidden');
                     uploadSection.classList.add('hidden');
-                    showMessage('Welcome back! You can now watch videos.', 'success');
+                    userStatusText.textContent = `Signed in anonymously`;
                 }
-                
+
                 // Set up real-time listeners for movies and series
                 const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
                 onSnapshot(moviesQuery, (querySnapshot) => {
@@ -220,9 +236,10 @@
                 }, (error) => {
                     showMessage(`Error fetching series: ${error.message}`, 'error');
                 });
-
             } else {
-                showSection(authContainer);
+                // If no user is signed in, show the authentication screen.
+                mainContainer.classList.add('hidden');
+                authContainer.classList.remove('hidden');
             }
         });
 
@@ -242,7 +259,7 @@
             try {
                 await signOut(auth);
                 showMessage('Signed out successfully!', 'info');
-                showSection(authContainer);
+                // The onAuthStateChanged listener will handle the UI change
             } catch (error) {
                 console.error(error);
                 showMessage(`Sign out failed: ${error.message}`, 'error');
@@ -272,8 +289,8 @@
 
             const videoType = videoTypeSelect.value;
             const publicId = e.target.publicId.value.trim();
-            const title = e.target.title.value.trim();
-            const description = e.target.description.value.trim();
+            const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
+            const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
             
             if (!publicId || !title || !description) {
                 showMessage('Please fill in all fields.', 'error');
@@ -384,7 +401,6 @@
                     await signInWithCustomToken(auth, initialAuthToken);
                 } catch (error) {
                     console.error('Error signing in with custom token:', error);
-                    // Fallback to anonymous sign-in if custom token fails
                     await signInAnonymously(auth);
                 }
             } else {
@@ -402,12 +418,20 @@
             <h1 class="text-5xl font-extrabold text-white tracking-tight">StreamVault</h1>
             <p class="mt-4 text-xl text-gray-400">Your personal streaming service</p>
         </header>
+        
+        <!-- User status and Sign-Out button section -->
+        <div class="flex justify-between items-center p-6 bg-gray-800 rounded-xl shadow-lg mb-8">
+            <p id="user-status" class="text-white text-lg font-semibold"></p>
+            <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200">
+                Sign Out
+            </button>
+        </div>
 
         <!-- Dynamic Message Box -->
         <div id="message-box" class="message-box space-y-4"></div>
 
-        <!-- Authentication Section (Initially Visible) -->
-        <div id="auth-container" class="max-w-md mx-auto p-8 bg-gray-800 rounded-2xl shadow-xl">
+        <!-- Authentication Section (Initially Hidden) -->
+        <div id="auth-container" class="max-w-md mx-auto p-8 bg-gray-800 rounded-2xl shadow-xl hidden">
             <h2 class="text-3xl font-bold text-center text-white mb-6">Sign In</h2>
             <button id="google-signin-btn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center space-x-2">
                 <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
@@ -422,13 +446,6 @@
 
         <!-- Main App Section (Hidden until login) -->
         <div id="main-container" class="hidden">
-            <!-- User Info and Sign Out -->
-            <div class="flex justify-end items-center bg-gray-800 p-6 rounded-xl shadow-lg mb-8">
-                <button id="signout-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200">
-                    Sign Out
-                </button>
-            </div>
-
             <!-- Video Upload Section (Hidden for non-admin) -->
             <div id="upload-section" class="max-w-2xl mx-auto mb-12 hidden">
                 <div class="bg-gray-800 p-8 rounded-2xl shadow-xl">
