@@ -36,49 +36,27 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, addDoc, onSnapshot, collection, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        // IMPORTANT: Cloudinary Configuration - You must set your Cloud Name and Upload Preset here.
+        // --- IMPORTANT: Cloudinary Configuration ---
         const CLOUDINARY_CLOUD_NAME = 'dvvzifhg2'; 
-        // ----------------------------------------------------------------------------------------------------
-        // IMPORTANT: The upload preset name has been updated based on your input.
-        // ----------------------------------------------------------------------------------------------------
         const CLOUDINARY_UPLOAD_PRESET = 'stream'; 
-
-        // Hardcoded Firebase configuration from the user's input.
-        const firebaseConfig = {
-            apiKey: "AIzaSyAWQzVqIzVT6-d8xw-1SfVlXzPLWsik_t0",
-            authDomain: "streamer-3cf9b.firebaseapp.com",
-            projectId: "streamer-3cf9b",
-            storageBucket: "streamer-3cf9b.firebasestorage.app",
-            messagingSenderId: "661085685654",
-            appId: "1:661085685654:web:76d44a02c7d40964fbffb7",
-            measurementId: "G-QZGEPNDB2G"
-        };
+        const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`;
         
-        // Hardcoded values for variables that would normally be provided by the environment.
-        const appId = 'streamvault-app-id';
+        // Global variables for Firebase configuration provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        let app;
-        let auth;
-        let db;
-        let isFirebaseInitialized = false;
-
-        // Check if firebaseConfig is valid before initializing
-        if (firebaseConfig && Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) {
-            // Initialize Firebase
-            app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getFirestore(app);
-            isFirebaseInitialized = true;
-        } else {
-            console.error("Firebase configuration is missing or invalid. App will not function correctly.");
-        }
-
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
         // --- IMPORTANT: CONFIGURATION FOR THE ADMIN'S GOOGLE EMAIL ---
         // This email address will be the only one able to upload videos.
+        // Replace with your Google email after signing in for the first time.
         const adminEmail = 'robloxbestgamer111@gmail.com';
 
         // --- UI Element References ---
@@ -102,6 +80,8 @@
         const episodeListContainer = document.getElementById('episode-list-container');
         const userStatusText = document.getElementById('user-status');
         const uploadButton = document.getElementById('upload-button');
+        const uploadProgress = document.getElementById('upload-progress');
+        const uploadProgressContainer = document.getElementById('upload-progress-container');
         const deleteConfirmModal = document.getElementById('delete-confirm-modal');
         const deleteConfirmBtn = document.getElementById('delete-confirm-btn');
         const deleteCancelBtn = document.getElementById('delete-cancel-btn');
@@ -214,381 +194,389 @@
 
         // --- Main Logic ---
 
-        // Only proceed if Firebase was successfully initialized
-        if (isFirebaseInitialized) {
-            // Firebase Auth State Listener
-            onAuthStateChanged(auth, async (user) => {
-                console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
-                const isAdmin = user && user.email === adminEmail;
-                
-                if (user) {
-                    mainContainer.classList.remove('hidden');
-                    authContainer.classList.add('hidden');
-                    signOutBtn.classList.remove('hidden');
-
-                    if (isAdmin) {
-                        showMessage('Welcome, Admin! You can now upload and delete content.', 'success');
-                        uploadSection.classList.remove('hidden');
-                        userStatusText.textContent = `Signed in as: ${user.email} (Admin)`;
-                    } else {
-                        uploadSection.classList.add('hidden');
-                        userStatusText.textContent = `Signed in as: ${user.email}`;
-                    }
-
-                    // Set up real-time listeners for movies and series
-                    const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
-                    onSnapshot(moviesQuery, (querySnapshot) => {
-                        const movies = [];
-                        querySnapshot.forEach((doc) => {
-                            movies.push({ id: doc.id, ...doc.data() });
-                        });
-                        renderVideos(movies, moviesContainer, 'movie', user);
-                    }, (error) => {
-                        showMessage(`Error fetching movies: ${error.message}`, 'error');
-                        console.error('Firestore Error (movies):', error);
-                    });
-
-                    const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
-                    onSnapshot(seriesQuery, (querySnapshot) => {
-                        const series = [];
-                        querySnapshot.forEach((doc) => {
-                            series.push({ id: doc.id, ...doc.data() });
-                        });
-                        renderVideos(series, seriesContainer, 'series', user);
-                    }, (error) => {
-                        showMessage(`Error fetching series: ${error.message}`, 'error');
-                        console.error('Firestore Error (series):', error);
-                    });
-
-                } else {
-                    mainContainer.classList.remove('hidden'); // Show main content in a read-only mode
-                    authContainer.classList.remove('hidden');
-                    userStatusText.textContent = 'You are not signed in.';
-                    signOutBtn.classList.add('hidden');
-                    uploadSection.classList.add('hidden');
-
-                    // Render videos for non-logged-in users as well
-                    const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
-                    onSnapshot(moviesQuery, (querySnapshot) => {
-                        const movies = [];
-                        querySnapshot.forEach((doc) => {
-                            movies.push({ id: doc.id, ...doc.data() });
-                        });
-                        renderVideos(movies, moviesContainer, 'movie', null);
-                    }, (error) => {
-                        showMessage(`Error fetching movies: ${error.message}`, 'error');
-                        console.error('Firestore Error (movies):', error);
-                    });
-
-                    const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
-                    onSnapshot(seriesQuery, (querySnapshot) => {
-                        const series = [];
-                        querySnapshot.forEach((doc) => {
-                            series.push({ id: doc.id, ...doc.data() });
-                        });
-                        renderVideos(series, seriesContainer, 'series', null);
-                    }, (error) => {
-                        showMessage(`Error fetching series: ${error.message}`, 'error');
-                        console.error('Firestore Error (series):', error);
-                    });
-                }
-            });
-
-            // --- Authentication Logic ---
-            googleSignInBtn.addEventListener('click', async () => {
-                try {
-                    console.log('Attempting Google sign-in...');
-                    const provider = new GoogleAuthProvider();
-                    await signInWithPopup(auth, provider);
-                    showMessage('Signed in with Google successfully!', 'success');
-                } catch (error) {
-                    console.error('Google sign-in failed:', error);
-                    if (error.code === 'auth/unauthorized-domain') {
-                        showMessage('Google sign-in failed. Please add this domain to your Firebase authorized domains list to fix this.', 'error');
-                    } else {
-                        showMessage(`Google sign-in failed: ${error.message}`, 'error');
-                    }
-                }
-            });
-
-            signOutBtn.addEventListener('click', async () => {
-                console.log('Attempting sign out...');
-                try {
-                    await signOut(auth);
-                    showMessage('Signed out successfully!', 'info');
-                } catch (error) {
-                    console.error('Sign out failed:', error);
-                    showMessage(`Sign out failed: ${error.message}`, 'error');
-                }
-            });
-
-            // --- Dynamic Upload Form Logic ---
-            videoTypeSelect.addEventListener('change', (e) => {
-                if (e.target.value === 'movie') {
-                    movieDetailsDiv.classList.remove('hidden');
-                    seriesDetailsDiv.classList.add('hidden');
-                } else {
-                    movieDetailsDiv.classList.add('hidden');
-                    seriesDetailsDiv.classList.remove('hidden');
-                }
-            });
-
-            // --- Handle Movie and Episode Uploads ---
-            uploadForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-
-                if (!auth.currentUser || auth.currentUser.email !== adminEmail) {
-                    showMessage('You do not have permission to upload videos.', 'error');
-                    return;
-                }
-
-                const videoType = videoTypeSelect.value;
-                const fileInput = document.getElementById('file-input');
-                const file = fileInput.files[0];
-                
-                if (!file) {
-                    showMessage('Please select a video file to upload.', 'error');
-                    return;
-                }
-
-                const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
-                const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
-                
-                if (!title || !description) {
-                    showMessage('Please fill in all fields.', 'error');
-                    return;
-                }
-
-                // Show a loading message and disable the button
-                uploadButton.textContent = 'Uploading...';
-                uploadButton.disabled = true;
-                showMessage('Uploading video to Cloudinary. This may take a moment...', 'info');
-
-                try {
-                    // Upload file to Cloudinary
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-
-                    const cloudinaryResponse = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`, {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    if (!cloudinaryResponse.ok) {
-                        // Log the full response for better debugging
-                        const errorText = await cloudinaryResponse.text();
-                        console.error('Cloudinary API Response (Error):', errorText);
-                        throw new Error(`Cloudinary upload failed. Response: ${errorText}`);
-                    }
-
-                    const cloudinaryData = await cloudinaryResponse.json();
-                    const publicId = cloudinaryData.public_id;
-
-                    // Save video metadata to Firestore
-                    const videoMetadata = {
-                        title,
-                        description,
-                        publicId,
-                        uploaderEmail: auth.currentUser.email,
-                        createdAt: new Date()
-                    };
-
-                    if (videoType === 'movie') {
-                        const moviesCollectionRef = collection(db, `artifacts/${appId}/public/data/movies`);
-                        await addDoc(moviesCollectionRef, videoMetadata);
-                        showMessage('Movie details saved!', 'success');
-                    } else if (videoType === 'series') {
-                        const seriesTitle = e.target.seriesTitle.value.trim();
-                        const episodeNumber = e.target.episodeNumber.value.trim();
-                        if (!seriesTitle || !episodeNumber) {
-                            showMessage('Please provide a Series Title and Episode Number.', 'error');
-                            return;
-                        }
-                        
-                        const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
-                        const q = query(seriesRef, where("title", "==", seriesTitle));
-                        const seriesDocs = await getDocs(q);
-
-                        let seriesId;
-                        if (seriesDocs.empty) {
-                            const newSeriesRef = await addDoc(seriesRef, { title: seriesTitle });
-                            seriesId = newSeriesRef.id;
-                        } else {
-                            seriesId = seriesDocs.docs[0].id;
-                        }
-                        
-                        const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
-                        await addDoc(episodesCollectionRef, { ...videoMetadata, episodeNumber: parseInt(episodeNumber, 10) });
-                        showMessage('Episode details saved!', 'success');
-                    }
-                    uploadForm.reset();
-                } catch (error) {
-                    console.error(error);
-                    showMessage(`Failed to save video metadata: ${error.message}`, 'error');
-                } finally {
-                    uploadButton.textContent = 'Save Content';
-                    uploadButton.disabled = false;
-                }
-            });
-
-            // --- Video Player and Episode List Modals Logic ---
-            document.addEventListener('click', async (e) => {
-                // Close the video player modal
-                if (e.target.id === 'close-video-modal-btn' || e.target.closest('#close-video-modal-btn')) {
-                    videoPlayer.pause();
-                    videoPlayer.src = '';
-                    videoPlayerModal.classList.add('hidden');
-                    return;
-                }
-                
-                // Close the episode list modal
-                if (e.target.id === 'close-episode-modal-btn' || e.target.closest('#close-episode-modal-btn')) {
-                    episodeListModal.classList.add('hidden');
-                    return;
-                }
-
-                // Close the delete confirmation modal
-                if (e.target.id === 'delete-cancel-btn' || e.target.closest('#delete-cancel-btn')) {
-                    deleteConfirmModal.classList.add('hidden');
-                    deletionTarget = null;
-                    return;
-                }
-
-                // Play a movie
-                if (e.target.classList.contains('play-btn')) {
-                    const videoURL = e.target.dataset.url;
-                    videoPlayer.src = videoURL;
-                    videoPlayerModal.classList.remove('hidden');
-                }
-
-                // View episodes for a series
-                if (e.target.classList.contains('view-episodes-btn')) {
-                    const seriesId = e.target.dataset.seriesId;
-                    const seriesTitle = e.target.dataset.seriesTitle;
-                    const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
-                    
-                    // Set up a real-time listener for episodes
-                    onSnapshot(episodesCollectionRef, (episodesSnapshot) => {
-                        episodeListContainer.innerHTML = '';
-                        if (episodesSnapshot.empty) {
-                            episodeListContainer.innerHTML = `<p class="text-center text-gray-400">No episodes uploaded for this series yet.</p>`;
-                        }
-                        const episodes = [];
-                        episodesSnapshot.forEach(doc => {
-                            episodes.push({ id: doc.id, ...doc.data() });
-                        });
-                        
-                        // Sort episodes by episode number
-                        episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
-
-                        episodes.forEach(episode => {
-                            const publicId = episode.publicId; 
-                            const videoURL = getCloudinaryVideoUrl(publicId);
-                            const episodeItem = document.createElement('div');
-                            episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center space-y-2 md:space-y-0';
-                            
-                            let deleteButtonHtml = '';
-                            if (auth.currentUser && auth.currentUser.email === adminEmail) {
-                                deleteButtonHtml = `
-                                    <button class="delete-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-full transition-colors duration-300 ml-0 md:ml-4"
-                                            data-id="${episode.id}"
-                                            data-collection="series"
-                                            data-parent-id="${seriesId}"
-                                            data-title="${episode.title}">
-                                        Delete
-                                    </button>`;
-                            }
-                            
-                            episodeItem.innerHTML = `
-                                <div>
-                                    <h4 class="text-xl font-semibold">${seriesTitle} - S1 E${episode.episodeNumber}</h4>
-                                    <p class="text-gray-400 text-sm">${episode.description}</p>
-                                </div>
-                                <div class="flex items-center space-x-2">
-                                    <button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-full" data-url="${videoURL}">Play</button>
-                                    ${deleteButtonHtml}
-                                </div>
-                            `;
-                            episodeListContainer.appendChild(episodeItem);
-                        });
-                    }, (error) => {
-                        console.error('Error fetching episodes:', error);
-                        showMessage(`Failed to load episodes: ${error.message}`, 'error');
-                    });
-                    
-                    episodeListModal.classList.remove('hidden');
-                }
-
-                // Show the deletion confirmation modal
-                if (e.target.classList.contains('delete-btn')) {
-                    const id = e.target.dataset.id;
-                    const collectionName = e.target.dataset.collection;
-                    const title = e.target.dataset.title;
-                    const parentId = e.target.dataset.parentId;
-                    
-                    deletionTarget = { id, collectionName, parentId, title };
-
-                    deleteConfirmText.textContent = `Are you sure you want to delete "${title}"? This action cannot be undone.`;
-                    deleteConfirmModal.classList.remove('hidden');
-                }
-            });
+        // Firebase Auth State Listener
+        onAuthStateChanged(auth, async (user) => {
+            console.log("Auth state changed. User:", user ? user.email || user.uid : 'null');
+            const isAdmin = user && user.email === adminEmail;
             
-            // Confirm deletion
-            deleteConfirmBtn.addEventListener('click', async () => {
-                if (!deletionTarget) return;
+            if (user) {
+                mainContainer.classList.remove('hidden');
+                authContainer.classList.add('hidden');
+                signOutBtn.classList.remove('hidden');
 
-                const { id, collectionName, parentId, title } = deletionTarget;
-                
-                let docPath;
-                if (collectionName === 'movies') {
-                    docPath = `artifacts/${appId}/public/data/movies/${id}`;
-                } else if (collectionName === 'series' && parentId) {
-                    docPath = `artifacts/${appId}/public/data/series/${parentId}/episodes/${id}`;
-                } else if (collectionName === 'series') {
-                    docPath = `artifacts/${appId}/public/data/series/${id}`;
+                if (isAdmin) {
+                    showMessage('Welcome, Admin! You can now upload and delete content.', 'success');
+                    uploadSection.classList.remove('hidden');
+                    userStatusText.textContent = `Signed in as: ${user.email} (Admin)`;
+                } else {
+                    uploadSection.classList.add('hidden');
+                    userStatusText.textContent = `Signed in as: ${user.email}`;
                 }
 
-                if (docPath) {
-                    await deleteFromFirestore(docPath, title);
+                // Set up real-time listeners for movies and series
+                const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
+                onSnapshot(moviesQuery, (querySnapshot) => {
+                    const movies = [];
+                    querySnapshot.forEach((doc) => {
+                        movies.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(movies, moviesContainer, 'movie', user);
+                }, (error) => {
+                    showMessage(`Error fetching movies: ${error.message}`, 'error');
+                    console.error('Firestore Error (movies):', error);
+                });
+
+                const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
+                onSnapshot(seriesQuery, (querySnapshot) => {
+                    const series = [];
+                    querySnapshot.forEach((doc) => {
+                        series.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(series, seriesContainer, 'series', user);
+                }, (error) => {
+                    showMessage(`Error fetching series: ${error.message}`, 'error');
+                    console.error('Firestore Error (series):', error);
+                });
+
+            } else {
+                mainContainer.classList.remove('hidden'); // Show main content in a read-only mode
+                authContainer.classList.remove('hidden');
+                userStatusText.textContent = 'You are not signed in.';
+                signOutBtn.classList.add('hidden');
+                uploadSection.classList.add('hidden');
+
+                // Render videos for non-logged-in users as well
+                const moviesQuery = query(collection(db, `artifacts/${appId}/public/data/movies`));
+                onSnapshot(moviesQuery, (querySnapshot) => {
+                    const movies = [];
+                    querySnapshot.forEach((doc) => {
+                        movies.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(movies, moviesContainer, 'movie', null);
+                }, (error) => {
+                    showMessage(`Error fetching movies: ${error.message}`, 'error');
+                    console.error('Firestore Error (movies):', error);
+                });
+
+                const seriesQuery = query(collection(db, `artifacts/${appId}/public/data/series`));
+                onSnapshot(seriesQuery, (querySnapshot) => {
+                    const series = [];
+                    querySnapshot.forEach((doc) => {
+                        series.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderVideos(series, seriesContainer, 'series', null);
+                }, (error) => {
+                    showMessage(`Error fetching series: ${error.message}`, 'error');
+                    console.error('Firestore Error (series):', error);
+                });
+            }
+        });
+
+        // --- Authentication Logic ---
+        googleSignInBtn.addEventListener('click', async () => {
+            try {
+                console.log('Attempting Google sign-in...');
+                const provider = new GoogleAuthProvider();
+                await signInWithPopup(auth, provider);
+                showMessage('Signed in with Google successfully!', 'success');
+            } catch (error) {
+                console.error('Google sign-in failed:', error);
+                if (error.code === 'auth/unauthorized-domain') {
+                    showMessage('Google sign-in failed. Please add this domain to your Firebase authorized domains list to fix this.', 'error');
+                } else {
+                    showMessage(`Google sign-in failed: ${error.message}`, 'error');
+                }
+            }
+        });
+
+        signOutBtn.addEventListener('click', async () => {
+            console.log('Attempting sign out...');
+            try {
+                await signOut(auth);
+                showMessage('Signed out successfully!', 'info');
+            } catch (error) {
+                console.error('Sign out failed:', error);
+                showMessage(`Sign out failed: ${error.message}`, 'error');
+            }
+        });
+
+        // --- Dynamic Upload Form Logic ---
+        videoTypeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'movie') {
+                movieDetailsDiv.classList.remove('hidden');
+                seriesDetailsDiv.classList.add('hidden');
+            } else {
+                movieDetailsDiv.classList.add('hidden');
+                seriesDetailsDiv.classList.remove('hidden');
+            }
+        });
+
+        // --- Handle Movie and Episode Uploads ---
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (!auth.currentUser || auth.currentUser.email !== adminEmail) {
+                showMessage('You do not have permission to upload videos.', 'error');
+                return;
+            }
+
+            const videoType = videoTypeSelect.value;
+            const fileInput = document.getElementById('file-input');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showMessage('Please select a video file to upload.', 'error');
+                return;
+            }
+
+            const title = videoType === 'movie' ? e.target.title.value.trim() : e.target['title-series'].value.trim();
+            const description = videoType === 'movie' ? e.target.description.value.trim() : e.target['description-series'].value.trim();
+            
+            if (!title || !description) {
+                showMessage('Please fill in all fields.', 'error');
+                return;
+            }
+
+            // Show a loading message, disable the button, and show progress bar
+            uploadButton.textContent = 'Uploading...';
+            uploadButton.disabled = true;
+            uploadProgressContainer.classList.remove('hidden');
+            showMessage('Uploading video to Cloudinary. This may take a moment...', 'info');
+
+            try {
+                // Upload file to Cloudinary
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+                const cloudinaryResponse = await fetch(CLOUDINARY_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!cloudinaryResponse.ok) {
+                    const errorText = await cloudinaryResponse.text();
+                    console.error('Cloudinary API Response (Error):', errorText);
+                    throw new Error(`Cloudinary upload failed. Response: ${errorText}`);
+                }
+
+                const cloudinaryData = await cloudinaryResponse.json();
+                const publicId = cloudinaryData.public_id;
+
+                // Save video metadata to Firestore
+                const videoMetadata = {
+                    title,
+                    description,
+                    publicId,
+                    uploaderEmail: auth.currentUser.email,
+                    createdAt: new Date()
+                };
+
+                if (videoType === 'movie') {
+                    const moviesCollectionRef = collection(db, `artifacts/${appId}/public/data/movies`);
+                    await addDoc(moviesCollectionRef, videoMetadata);
+                    showMessage('Movie details saved!', 'success');
+                } else if (videoType === 'series') {
+                    const seriesTitle = e.target.seriesTitle.value.trim();
+                    const episodeNumber = e.target.episodeNumber.value.trim();
+                    if (!seriesTitle || !episodeNumber) {
+                        showMessage('Please provide a Series Title and Episode Number.', 'error');
+                        return;
+                    }
                     
-                    // IMPORTANT: The following is a security-conscious note.
-                    // To also delete the video from Cloudinary, you would need to implement
-                    // a backend function that receives the publicId and performs a
-                    // signed Cloudinary API call. A direct client-side delete request
-                    // would require exposing your Cloudinary API Secret, which is a major
-                    // security risk. This implementation only removes the record from Firestore.
-                    console.warn(`Record with ID '${id}' deleted from Firestore. Note: Cloudinary file must be manually deleted or handled by a backend service.`);
+                    const seriesRef = collection(db, `artifacts/${appId}/public/data/series`);
+                    const q = query(seriesRef, where("title", "==", seriesTitle));
+                    const seriesDocs = await getDocs(q);
+
+                    let seriesId;
+                    if (seriesDocs.empty) {
+                        const newSeriesRef = await addDoc(seriesRef, { title: seriesTitle });
+                        seriesId = newSeriesRef.id;
+                    } else {
+                        seriesId = seriesDocs.docs[0].id;
+                    }
+                    
+                    const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                    await addDoc(episodesCollectionRef, { ...videoMetadata, episodeNumber: parseInt(episodeNumber, 10) });
+                    showMessage('Episode details saved!', 'success');
                 }
                 
+                uploadForm.reset();
+            } catch (error) {
+                console.error(error);
+                showMessage(`Failed to upload or save video metadata: ${error.message}`, 'error');
+            } finally {
+                uploadButton.textContent = 'Save Content';
+                uploadButton.disabled = false;
+                uploadProgressContainer.classList.add('hidden');
+            }
+        });
+
+        // --- Video Player and Episode List Modals Logic ---
+        document.addEventListener('click', async (e) => {
+            // Close the video player modal
+            if (e.target.id === 'close-video-modal-btn' || e.target.closest('#close-video-modal-btn')) {
+                videoPlayer.pause();
+                videoPlayer.src = '';
+                videoPlayerModal.classList.add('hidden');
+                return;
+            }
+            
+            // Close the episode list modal
+            if (e.target.id === 'close-episode-modal-btn' || e.target.closest('#close-episode-modal-btn')) {
+                episodeListModal.classList.add('hidden');
+                return;
+            }
+
+            // Close the delete confirmation modal
+            if (e.target.id === 'delete-cancel-btn' || e.target.closest('#delete-cancel-btn')) {
                 deleteConfirmModal.classList.add('hidden');
                 deletionTarget = null;
-            });
+                return;
+            }
 
-            // --- Tab switching logic ---
-            moviesTabBtn.addEventListener('click', () => {
-                currentActiveTab = 'movies';
-                moviesTabBtn.classList.add('active');
-                seriesTabBtn.classList.remove('active');
-                moviesContainer.classList.remove('hidden');
-                seriesContainer.classList.add('hidden');
-            });
+            // Play a movie
+            if (e.target.classList.contains('play-btn')) {
+                const videoURL = e.target.dataset.url;
+                videoPlayer.src = videoURL;
+                videoPlayerModal.classList.remove('hidden');
+            }
 
-            seriesTabBtn.addEventListener('click', () => {
-                currentActiveTab = 'series';
-                seriesTabBtn.classList.add('active');
-                moviesTabBtn.classList.remove('active');
-                seriesContainer.classList.remove('hidden');
-                moviesContainer.classList.add('hidden');
-            });
-        } else {
-            // This part of the code will execute if the firebaseConfig object is empty or invalid
-            document.addEventListener('DOMContentLoaded', () => {
-                authContainer.classList.remove('hidden');
-                mainContainer.classList.add('hidden');
-                showMessage('Application is not configured correctly. Please check Firebase settings.', 'error');
-            });
-        }
+            // View episodes for a series
+            if (e.target.classList.contains('view-episodes-btn')) {
+                const seriesId = e.target.dataset.seriesId;
+                const seriesTitle = e.target.dataset.seriesTitle;
+                const episodesCollectionRef = collection(db, `artifacts/${appId}/public/data/series/${seriesId}/episodes`);
+                
+                // Set up a real-time listener for episodes
+                onSnapshot(episodesCollectionRef, (episodesSnapshot) => {
+                    episodeListContainer.innerHTML = '';
+                    if (episodesSnapshot.empty) {
+                        episodeListContainer.innerHTML = `<p class="text-center text-gray-400">No episodes uploaded for this series yet.</p>`;
+                    }
+                    const episodes = [];
+                    episodesSnapshot.forEach(doc => {
+                        episodes.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    // Sort episodes by episode number
+                    episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+                    episodes.forEach(episode => {
+                        const publicId = episode.publicId; 
+                        const videoURL = getCloudinaryVideoUrl(publicId);
+                        const episodeItem = document.createElement('div');
+                        episodeItem.className = 'bg-gray-700 p-4 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center space-y-2 md:space-y-0';
+                        
+                        let deleteButtonHtml = '';
+                        if (auth.currentUser && auth.currentUser.email === adminEmail) {
+                            deleteButtonHtml = `
+                                <button class="delete-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-full transition-colors duration-300 ml-0 md:ml-4"
+                                        data-id="${episode.id}"
+                                        data-collection="series"
+                                        data-parent-id="${seriesId}"
+                                        data-title="${episode.title}">
+                                    Delete
+                                </button>`;
+                        }
+                        
+                        episodeItem.innerHTML = `
+                            <div>
+                                <h4 class="text-xl font-semibold">${seriesTitle} - S1 E${episode.episodeNumber}</h4>
+                                <p class="text-gray-400 text-sm">${episode.description}</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <button class="play-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-full" data-url="${videoURL}">Play</button>
+                                ${deleteButtonHtml}
+                            </div>
+                        `;
+                        episodeListContainer.appendChild(episodeItem);
+                    });
+                }, (error) => {
+                    console.error('Error fetching episodes:', error);
+                    showMessage(`Failed to load episodes: ${error.message}`, 'error');
+                });
+                
+                episodeListModal.classList.remove('hidden');
+            }
+
+            // Show the deletion confirmation modal
+            if (e.target.classList.contains('delete-btn')) {
+                const id = e.target.dataset.id;
+                const collectionName = e.target.dataset.collection;
+                const title = e.target.dataset.title;
+                const parentId = e.target.dataset.parentId;
+                
+                deletionTarget = { id, collectionName, parentId, title };
+
+                deleteConfirmText.textContent = `Are you sure you want to delete "${title}"? This action cannot be undone.`;
+                deleteConfirmModal.classList.remove('hidden');
+            }
+        });
+        
+        // Confirm deletion
+        deleteConfirmBtn.addEventListener('click', async () => {
+            if (!deletionTarget) return;
+
+            const { id, collectionName, parentId, title } = deletionTarget;
+            
+            let docPath;
+            if (collectionName === 'movies') {
+                docPath = `artifacts/${appId}/public/data/movies/${id}`;
+            } else if (collectionName === 'series' && parentId) {
+                docPath = `artifacts/${appId}/public/data/series/${parentId}/episodes/${id}`;
+            } else if (collectionName === 'series') {
+                docPath = `artifacts/${appId}/public/data/series/${id}`;
+            }
+
+            if (docPath) {
+                await deleteFromFirestore(docPath, title);
+                
+                // IMPORTANT: The following is a security-conscious note.
+                // To also delete the video from Cloudinary, you would need to implement
+                // a backend function that receives the publicId and performs a
+                // signed Cloudinary API call. A direct client-side delete request
+                // would require exposing your Cloudinary API Secret, which is a major
+                // security risk. This implementation only removes the record from Firestore.
+                console.warn(`Record with ID '${id}' deleted from Firestore. Note: Cloudinary file must be manually deleted or handled by a backend service.`);
+            }
+            
+            deleteConfirmModal.classList.add('hidden');
+            deletionTarget = null;
+        });
+
+        // --- Tab switching logic ---
+        moviesTabBtn.addEventListener('click', () => {
+            currentActiveTab = 'movies';
+            moviesTabBtn.classList.add('active');
+            seriesTabBtn.classList.remove('active');
+            moviesContainer.classList.remove('hidden');
+            seriesContainer.classList.add('hidden');
+        });
+
+        seriesTabBtn.addEventListener('click', () => {
+            currentActiveTab = 'series';
+            seriesTabBtn.classList.add('active');
+            moviesTabBtn.classList.remove('active');
+            seriesContainer.classList.remove('hidden');
+            moviesContainer.classList.add('hidden');
+        });
+        
+        // --- Initial Auth Check ---
+        const signInWithCustomTokenOnLoad = async () => {
+            if (initialAuthToken) {
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } catch (error) {
+                    console.error('Error signing in with custom token:', error);
+                    // Fallback to anonymous sign-in if custom token fails
+                    await signInAnonymously(auth);
+                }
+            } else {
+                 await signInAnonymously(auth);
+            }
+        };
+        signInWithCustomTokenOnLoad();
     </script>
 
     <!-- App Container -->
@@ -678,9 +666,13 @@
                                 <textarea id="description-series" name="description-series" rows="3" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"></textarea>
                             </div>
                         </div>
-
+                        
+                        <div class="w-full bg-gray-700 rounded-full h-2.5 dark:bg-gray-700 hidden" id="upload-progress-container">
+                            <div id="upload-progress" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                        </div>
+                        
                         <button type="submit" id="upload-button" class="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-700 transition-colors duration-200">
-                            Save Content
+                            Upload Content
                         </button>
                     </form>
                 </div>
